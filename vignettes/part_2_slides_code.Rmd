@@ -1,0 +1,449 @@
+---
+title: "Hierachical Binary Logit regression in STAN"
+author: "Alina Ferecatu"
+date: "EMAC 2018"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+
+```{r cache = FALSE}
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(reshape2)
+library(ggpubr)
+library(bayesplot)
+library(rstan)
+
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+```
+
+
+SIMULATE DATA
+
+```{r}
+set.seed(66)
+nvar = 3                           ## number of coefficients
+nlgt = 500                         ## number of cross-sectional units
+nobs = 10                          ## number of observations per unit
+nz = 1                             ## number of regressors in mixing distribution
+
+## set hyper-parameters
+## B=ZDelta + U  
+Z = as.matrix(rep(1, nlgt))
+Delta = matrix(c(-2, -1, 0.5), nrow = nz, ncol = nvar)
+iota = matrix(1, nrow = nvar, ncol = 1)
+Vbeta = 0.5 * diag(nvar) + 0.5 * iota %*% t(iota)
+cov2cor(Vbeta)
+
+## simulate data
+longdata = NULL
+
+for (i in 1:nlgt)
+{
+  betai = t(Delta) %*% Z[i, ] + as.vector(t(chol(Vbeta)) %*% rnorm(nvar))
+  
+  X = matrix(runif(nobs * (nvar - 1)), nrow = nobs, ncol = (nvar - 1))
+  int = rep(1, nobs)
+  X = cbind(int, X)
+  
+  Pb = exp(X %*% betai) / (1 + exp(X %*% betai))
+  unif = runif(nobs, 0, 1)
+  y = ifelse(unif < Pb, 1, 0)
+  
+  #AverageC=matrix(double(n_rounds*n_arms), ncol=n_arms)
+  longdata[[i]] = list(betai = betai, y = y, X = X)
+}
+
+true_betas = NULL
+for (i in 1:nlgt) {
+  true_betas = cbind(true_betas, longdata[[i]]$betai)
+}
+rowMeans(true_betas)
+```
+
+
+Get the dataset in the right format
+
+```{r}
+data_long = NULL
+for (i in 1:nlgt) {
+  data_long = rbind(data_long, cbind(rep(i, nobs), 1:nobs, longdata[[i]]$y, longdata[[i]]$X))
+}
+dim(data_long)
+
+dat = list(
+  nvar = ncol(X),
+  N = nrow(data_long),
+  nind = nlgt,
+  y = data_long[, 3],
+  x = data_long[, 4:6],
+  ind = data_long[, 1]
+)
+```
+
+
+BUILD THE STAN MODEL
+
+```{r}
+################ Hierarchical model - variance components only ###############
+hierarchical_binlogit_nocov = "
+data {
+  int<lower = 1> nvar; // number of parameters in the logit regression
+  int<lower = 0> N; // number of observations
+  int<lower = 1> nind; // number of individuals
+  int<lower = 0, upper = 1> y[N];
+  int<lower = 1, upper = nind> ind[N]; // indicator for individuals
+  row_vector[nvar] x[N]; 
+}
+parameters {
+  real delta[nvar];
+  real<lower = 0> tau[nvar];
+  vector[nvar] beta[nind];
+}
+
+model {
+  to_vector(delta) ~ normal(0, 5);
+  to_vector(tau) ~ gamma(2, 0.5);
+  for (h in 1:nind) {
+    beta[h] ~ normal(delta, tau);
+  }
+  for (n in 1:N) {
+    y[n] ~ bernoulli_logit(x[n] * beta[ind[n]]);
+  }
+}
+
+generated quantities {
+  int z[N];
+  real log_lik[N]; 
+  
+  for (n in 1:N) {
+    z[n] = bernoulli_logit_rng(x[n] * beta[ind[n]]);
+    log_lik[n] = bernoulli_logit_lpmf(y[n]|x[n] * beta[ind[n]]);
+  }
+}
+"
+m = stan_model(model_code = hierarchical_binlogit_nocov)
+```
+
+
+```{r}
+################ Hierarchical model - full covariance matrix ###############
+####### FULL COVARIANCE MODEL ##########
+hierarchical_binlogit_fullcov = "
+data {
+  int<lower = 1> nvar; // number of parameters in the logit regression
+  int<lower = 0> N; // number of observations
+  int<lower = 1> nind; // number of individuals
+  int<lower = 0, upper = 1> y[N];
+  int<lower = 1, upper = nind> ind[N]; // indicator for individuals
+  row_vector[nvar] x[N]; 
+}
+
+parameters {
+  vector[nvar] delta;
+  vector<lower = 0>[nvar] tau;
+  vector[nvar] beta[nind];
+  corr_matrix[nvar] Omega; // Vbeta - prior correlation
+}
+
+model {
+  to_vector(delta) ~ normal(0, 5);
+  to_vector(tau) ~ gamma(2, 0.5);
+  Omega ~ lkj_corr(2);
+  
+  for (h in 1:nind) {
+    beta[h] ~ multi_normal(delta, quad_form_diag(Omega, tau));
+  }
+  for (n in 1:N) {
+    y[n] ~ bernoulli_logit(x[n] * beta[ind[n]]);
+  }
+}
+
+generated quantities {
+  corr_matrix[nvar] Omega_corr;
+  int z[N];
+  real log_lik[N]; 
+  
+  Omega_corr = Omega;
+  for (n in 1:N) {
+    z[n] = bernoulli_logit_rng(x[n] * beta[ind[n]]);
+    log_lik[n] = bernoulli_logit_lpmf(y[n]|x[n] * beta[ind[n]]);
+  }
+}
+"
+m = stan_model(model_code = hierarchical_binlogit_fullcov)
+```
+
+
+```{r}
+################ HB Full covariance noncentered reparametrization #############
+hierarchical_binlogit_fullcov_noncentered = "
+data {
+  int<lower = 1> nvar; // number of parameters in the logit regression
+  int<lower = 0> N; // number of observations
+  int<lower = 1> nind; // number of individuals
+  int<lower = 0, upper = 1> y[N];
+  int<lower = 1, upper = nind> ind[N]; // indicator for individuals
+  vector[nvar] x[N]; 
+}
+
+parameters {
+  matrix[nvar, nind] alpha; // nvar*H parameter matrix
+  row_vector[nvar] delta;
+  vector<lower = 0>[nvar] tau;
+  cholesky_factor_corr[nvar] L_Omega;
+}
+
+
+transformed parameters {
+  row_vector[nvar] beta[nind];
+  matrix[nind,nvar] Vbeta_reparametrized;
+  Vbeta_reparametrized = (diag_pre_multiply(tau, L_Omega)*alpha)';
+  
+  for (h in 1:nind) {
+    beta[h] = delta + Vbeta_reparametrized[h];
+  }
+}
+
+model {
+  L_Omega~lkj_corr_cholesky(2);
+  to_vector(delta) ~ normal(0, 5);
+  to_vector(tau) ~ gamma(2, 0.5);
+  to_vector(alpha) ~ normal(0, 1);
+  
+  for (n in 1:N) {
+  y[n] ~ bernoulli_logit(beta[ind[n]] * x[n]);
+  }
+}
+
+generated quantities {
+  corr_matrix[nvar] Omega;
+  int z[N];
+  real log_lik[N]; 
+  
+  Omega = L_Omega * L_Omega';
+  for (n in 1:N) {
+    z[n] = bernoulli_logit_rng(beta[ind[n]] * x[n]);
+    log_lik[n] = bernoulli_logit_lpmf(y[n] | beta[ind[n]] * x[n]);
+  }
+
+}
+"
+m = stan_model(model_code = hierarchical_binlogit_fullcov_noncentered)
+```
+
+Examine choice of prior distributions 
+
+```{r}
+set.seed(999999)
+nobs=100
+prior_gamma = data.frame(
+  obs = 1:100,
+  gamma_11 = rgamma(nobs / 2, 1, 1),
+  gamma_21 = rgamma(nobs / 2, 2, 1),
+  gamma_1half = rgamma(nobs / 2, 2, 0.5)
+)
+
+colnames(prior_gamma) <-
+  c("Obs", "Gamma(1,1)", "Gamma(2,1)", "Gamma(2,1/2)")
+prior_gamma = melt(prior_gamma, id.vars = c("Obs"))
+head(prior_gamma)
+pg = prior_gamma %>% 
+  ggplot(aes(x = Obs, y = value))+
+  geom_point()+
+  scale_y_continuous(name = "Gamma prior")+
+  labs(x = "")+
+  facet_wrap(~ variable, ncol = 3)
+
+set.seed(999999)
+prior_cauchy = data.frame(
+  obs = 1:100,
+  cauchy_01 = rcauchy(nobs, 0, 1),
+  cauchy_02 = rcauchy(nobs, 0, 2),
+  cauchy_05 = rcauchy(nobs, 0, 5)
+)
+colnames(prior_cauchy) <-
+  c("Obs",
+    "Half-Cauchy(0,1)",
+    "Half-Cauchy(0,2)",
+    "Half-Cauchy(0,5)")
+prior_cauchy = melt(prior_cauchy, id.vars = c("Obs"))
+
+prior_cauchy %<>% filter(value > 0)
+head(prior_cauchy)
+pc = prior_cauchy %>% 
+  ggplot(aes(x = Obs, y = value))+
+  geom_point()+
+  scale_y_continuous(name = "Half-Cauchy prior")+
+  labs(x = "")+
+  facet_wrap(~ variable, ncol = 3)
+
+ggarrange(pg, pc, nrow = 2)
+```
+
+RUN THE STAN MODEL
+
+```{r}
+hbin_logit_Stan_fullcov <-
+  stan(
+    model_code = hierarchical_binlogit_fullcov,
+    data = dat,
+    chains = 3,
+    iter = 4000,
+    warmup = 2000,
+    control = list(adapt_delta = 0.9)
+  )
+#setwd("/Users/alinaferecatu/Dropbox/emac 2018 HBA tutorial/")
+#save(hbin_logit_Stan_fullcov_noncentered, file="hbin_logit_Stan_fullcov_ncp.RData")
+
+summary(
+  hbin_logit_Stan_fullcov_noncentered,
+  pars = c("Omega"),
+  probs = c(0.025, 0.975)
+)
+
+posterior_nocov = as.array(hbin_logit_Stan_nocov)
+posterior_fullcov = as.array(hbin_logit_Stan_fullcov)
+posterior_fullcov_ncp = as.array(hbin_logit_Stan_fullcov_noncentered)
+```
+
+
+PLOTS
+```{r}
+pdens = mcmc_dens_overlay(posterior_fullcov_ncp,
+                          pars = c("delta[1]", "delta[2]", "delta[3]"))
+pdens
+
+mcmc_pairs(
+  posterior_fullcov_ncp,
+  pars = c("delta[1]", "delta[2]", "delta[3]"),
+  off_diag_args = list(size = 1.5)
+)
+
+### traceplots ########
+color_scheme_set("mix-blue-red")
+p1 = mcmc_trace(
+  posterior_nocov,
+  pars = c("delta[1]", "delta[2]", "delta[3]"),
+  facet_args = list(ncol = 1, strip.position = "left")
+)
+p2 = mcmc_trace(
+  posterior_fullcov,
+  pars = c("delta[1]", "delta[2]", "delta[3]"),
+  facet_args = list(ncol = 1, strip.position = "left")
+)
+p3 = mcmc_trace(
+  posterior_fullcov_ncp,
+  pars = c("delta[1]", "delta[2]", "delta[3]"),
+  facet_args = list(ncol = 1, strip.position = "left")
+)
+ggarrange(p2, p3, ncol = 2)
+```
+
+
+Individual parameters plots with bayesplot
+```{r}
+dimnames(posterior_fullcov_ncp[, , 1516:2015])
+color_scheme_set("mix-blue-red")
+mcmc_intervals(posterior_fullcov_ncp[, , 1516:1615],
+               point_est = "none",
+               prob = 0.8,
+               prob_outer = 0.95) +
+  ggplot2::geom_point(aes(x = true_betas[1, 1:100], y = 1:100),
+                      alpha = 1,
+                      size = 0.5) +
+  theme(axis.ticks.y = element_blank(), axis.text.y = element_blank()) +
+  labs(x = "True parameter values (black dots) and HDI",
+       y = "Consumer 1 (top) to 100 (bottom)")
+```
+
+
+posterior predictive checks based on y_rep
+```{r}
+hbin_ncp_draws = rstan::extract(hbin_logit_Stan_fullcov_noncentered)
+names(hbin_ncp_draws)
+y = data_long[, 3]
+y_rep = hbin_ncp_draws$z
+dim(y_rep)
+length(rowSums(y_rep))
+head(y_rep)
+
+library(reshape2)
+library(ggplot2)
+## plot of observed # of successes (T(y) - red vertical line), vs. posterior predictive replications of # of successes T(yrep)
+## compute 95% confidence interval and p_value for obs T(y)
+
+successes_plot = data.frame(sum_yrep = rowSums(y_rep)) %>%
+  ggplot(aes(x = rowSums(y_rep))) +
+  geom_histogram(binwidth = 10, alpha = 0.5) +
+  geom_vline(xintercept = sum(y), colour = "red") +
+  theme_minimal() + labs(x = "Number of successes", y = "count")
+## number of switches, to check whether there is correlation between the trials of the bernoulli
+N = 5000
+ind = data_long[, 1]
+switch_y = rep(0, length(y))
+i = 2
+while (i < N) {
+  if (ind[i] != ind[i - 1])
+    i = i + 1
+  if (y[i] != y[i - 1])
+    switch_y[i] = 1
+  i = i + 1
+}  
+b = cbind(switch_y, y, ind)
+head(b)
+sum(switch_y)
+
+## number of swithes in the posterior replications
+## s is the number of iterations after burnin
+hbin_ncp_draws = rstan::extract(hbin_logit_Stan_fullcov_noncentered)
+y_rep = hbin_ncp_draws$z
+S = 6000
+switch_yrep = matrix(rep(0, length(y) * S), nrow = S)
+for (j in 1:S)
+{
+  i = 2
+  while (i < N)
+  {
+    if (ind[i] != ind[i - 1])
+      i = i + 1
+    if (y_rep[j, i] != y_rep[j, i - 1])
+      switch_yrep[j, i] = 1
+    i = i + 1
+  }
+}
+rowSums(switch_yrep)
+
+switch_plot = data.frame(sum_switch_yrep = rowSums(switch_yrep)) %>%
+  ggplot(aes(x = sum_switch_yrep)) +
+  geom_histogram(binwidth = 10, alpha = 0.5) +
+  geom_vline(xintercept = sum(switch_y), colour = "red") +
+  theme_minimal() + labs(x = "Number of switches", y = "count")
+```
+
+
+MODEL COMPARISON
+```{r}
+library(loo)
+logl_fullcov = extract_log_lik(hbin_logit_Stan_fullcov)
+logl_nocov = extract_log_lik(hbin_logit_Stan_nocov)
+logl_ncp = extract_log_lik(hbin_logit_Stan_fullcov_noncentered)
+loo1 <- loo(logl_nocov, save_psis = TRUE)
+loo2 <- loo(logl_fullcov, save_psis = TRUE)
+loo3 <- loo(logl_ncp, save_psis = TRUE)
+compare(loo2, loo3)
+```
+

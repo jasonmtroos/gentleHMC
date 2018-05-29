@@ -5,3 +5,4 @@
 vignettes/*_cache/*
 vignettes/pdfs/*
 .DS_Store
+inst/doc
