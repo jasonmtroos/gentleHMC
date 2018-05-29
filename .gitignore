@@ -1,0 +1,7 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+vignettes/*_cache/*
+vignettes/pdfs/*
+.DS_Store

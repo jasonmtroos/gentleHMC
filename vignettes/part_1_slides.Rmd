@@ -1,0 +1,603 @@
+---
+title: "Quantitative Marketing SIG: A Gentle Introduction to Estimation Bayesian Models Using Stan"
+author: "Jason M.T. Roos"
+date: "EMAC 2018"
+output: 
+  beamer_presentation:
+    highlight: pygments
+    includes:
+      in_header: slide_preamble.tex
+    keep_tex: no
+    latex_engine: xelatex
+    slide_level: 2
+  html_document:
+    highlight: pygments
+    keep_md: yes
+    slide_level: 2
+knitr:
+  cache: 1
+classoption: t
+vignette: >
+  %\VignetteIndexEntry{"Slides from Part 1"}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  cache = TRUE
+)
+```
+
+```{r echo = FALSE, warning = FALSE, message = FALSE, include = FALSE, cache = FALSE}
+library(rstan)
+library(tidyverse)
+library(brms)
+library(rstanarm)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+```
+
+
+# Motivation
+
+## Why we're talking about Stan today
+
+\only<1>{
+\includegraphics[width=\columnwidth]{part_1_files/trace_good.png}
+}
+\only<2>{
+\includegraphics[width=\columnwidth]{part_1_files/trace_bad.png}
+}
+
+
+
+## Why we're talking about Stan today
+
+* Highly efficient sampling from complex Bayesian models that Gibbs and Metropolis-Hastings might fail at
+
+* Interfaces to R, Python, Matlab, etc. 
+
+* Coding errors limited to the model (not sampling algorithm)
+
+* Diagnostic tools to evaluate if your sampler works
+
+* Might require you to learn a new programming language (not necessarily)
+
+
+## Roadmap
+
+Part 1: Introduction to Hamiltonian Monte Carlo and Stan
+
+* Sampling from complex Bayesian models using standard methods is **inefficient** and error-prone 
+
+* **Hamiltonian Monte Carlo (HMC)** offers huge improvements
+
+* Intuition for **how HMC works**
+
+* Implementing an HMC sampler in **Stan**
+
+\vfill
+\hrule
+\vfill
+
+Part 2: **Alina Ferecatu** on hierarchical logit and models of bounded rationality
+
+Part 3: **Hernan Bruno** on multivariate Tobit and two-stage "hurdle" models
+
+
+
+## Setup
+
+* **Goal:** Sample from some distribution (the **target**)
+
+  * Typically a Bayesian posterior distribution, $\pi(\theta|y,x)$
+  
+  * But generally **any distribution** $\pi(\theta)$
+
+* **Requirements:**
+
+  * All elements $\theta_i\in\theta$ (**parameters**) are **continuous**
+    * Discrete parameters **cannot be sampled**
+    * Usually they can be **integrated out** before sampling
+
+  * Target distribution **can be evaluated** at any permitted value of $\theta$ 
+    * With or **without normalizing constant**
+
+
+## Common approaches for Bayesian models
+
+* Metropolis-Hastings (MH) or Gibbs sampling
+
+* Typical problems:
+
+  * High parameter correlation **kills efficiency**
+  
+  * **Finite chains** may dramatically over- and under-sample certain regions, with **biased inferences**
+  
+    * Convergence guaranteed *asymptotically*
+  
+* Many alternatives alleviate these problems
+
+  * One discussed today: **Hamiltonian Monte Carlo (HMC)**
+  
+# Hamiltonian Monte Carlo
+
+## Hamiltonian mechanics
+
+* Idealized physical model of random particle motion
+
+* A particle's potential energy is $-\log \pi(\theta)$
+
+  * Start thinking of $\theta$ as the **parameter vector** and $\pi(\theta)$ its **density**
+
+* Particle has mass $M$, momentum $p$, and position $\theta$
+
+  * Start thinking of $p$ as the **random step** in standard random-walk Metropolis, and $M$ as its **step size**
+
+* Total energy of the physical system is constant
+
+## Hamiltonian equations
+
+* Hamilton's equations describe the **particle's motion** in **continuous** time
+$$\begin{aligned}
+\mathsf{Change~in~position\!:}&~&\frac{\mathsf{d}\theta}{\mathsf{d}t} &= M^{-1} p\\
+\mathsf{Change~in~momentum\!:}&~&\frac{\mathsf{d}p}{\mathsf{d}t} &= \nabla_\theta \log \left[\pi\left(\theta\right)\right]
+\end{aligned}$$
+
+* Motion is like "a frictionless puck that slides over a surface of varying height" (Neal 2011, p.2)
+
+* I prefer: **"a frictionless skateboarder in an empty swimming pool"**
+
+---
+
+\vspace{12pt}one_particle.mp4
+
+## Idealized version of Hamiltonian MC (HMC) sampling
+
+\only<1,3,5>{
+\begin{itemize}
+\item<1->Take a particle and \alert{give it a random shove} (momentum $p$)
+\begin{itemize}
+\item Let it move for a while and \alert{then stop it}
+\item \alert{Record its position} (value of the parameter vector $\theta$)
+\end{itemize}
+\item<3->Give it another \alert{random} shove
+\begin{itemize}
+\item Let it more for a while and \alert{then stop it}
+\item \alert{Record its position} again
+\end{itemize}
+\item<5->Repeat
+\end{itemize}
+}
+\only<2>{
+\vspace{12pt}hmct1.mp4...
+}
+\only<4>{
+\vspace{12pt}hmct2.mp4...
+}
+\only<6>{
+\vspace{12pt}hmct3.mp4...
+}
+\only<7>{
+\vspace{12pt}hmct4.mp4...
+}
+
+
+## Idealized version of HMC is just that...an ideal
+
+* It would generate **exact samples from target distribution**
+
+* However:
+
+  * Analytical solutions to this continuous time model aren't available 
+  
+  * **Numerical approximation** is necessary
+
+* Solution: 
+
+  * Discretize the model by dividing **time** into **discrete steps**
+
+  * Simulate the particle's motion in **discrete time**
+
+
+## Discretized version of HMC
+
+* Discretize time into small steps of length $\epsilon$, leading to sampling trajectories $$\color{duskyblue}{\theta^{(t)}}\color{brightpink}{\rightarrow\theta^{(t+\epsilon)}}\rightarrow\color{brightpink}{\theta^{(t+2\epsilon)}}\rightarrow\color{brightpink}{\theta^{(t+3\epsilon)}}\rightarrow\color{brightpink}{\theta^{(t+4\epsilon)}}\rightarrow\dots\rightarrow\color{duskyblue}{\theta^{(t+1)}}$$
+\vspace{-18pt}
+
+  * Monte Carlo samples are $t$ and $t+1$
+  * $t+\epsilon$, $t+2\epsilon$, etc. are intermediate "leapfrog" steps
+
+* No longer a trajectory in $\pi\left(\theta\right)$, but **close**
+
+  * Must **correct for discrepancy** between continuous model and discrete approximation
+  * Occasionally **reject samples** (as in MH) to correct for discrepancy
+
+---
+
+\vspace{12pt}ani.mp4
+
+
+## Costs and benefits of standard HMC
+
+* **Benefits:** 
+  * Rarely rejects proposals, lower autocorrelation
+  * Almost always **more efficient** than Gibbs or MH
+
+* **Costs:** 
+  * Need to compute $\nabla_\theta \log \pi\left(\theta\right)$, the **gradient** (first derivative) of the log of the target density, with respect to the parameters $\theta$, for all $L$ intermediate steps
+  * **Calculus is hard**
+    * However: **Automatic differentiation** will save us
+
+## Detour: What is automatic differentiation?
+
+* While computing the value of a function, obtain **exact values of derivatives of that function**
+
+* **Not magic**: Exploit the **chain rule** from calculus: 
+$$\begin{aligned}(f\circ g)^\prime  &= (f^\prime \circ g)g^\prime\qquad\text{...or...}\\
+\frac{\partial}{\partial x} f(g(x)) &= f^\prime(g(x))g^\prime(x)\end{aligned}$$
+\vspace{-12pt}
+
+* Example: mean $\mu$ of normal distribution:
+$$\begin{array}{rcccccccc}
+-\frac{1}{2}(y-\mu)^2 &=& \mu & \rightarrow & y - (\cdot) & \rightarrow & {(\cdot)}^2 & \rightarrow & {-\frac{1}{2}(\cdot)}\\
+&&&&\downarrow&&\downarrow&&\downarrow\\
+\frac{\partial}{\partial \mu} &=& & & -1 & \times & 2 (y-\mu) & \times & -\frac{1}{2}
+\end{array}$$
+
+## Comparison of HMC and RW Metropolis
+
+\vspace{12pt}hmc.rw.mp4
+
+# Stan
+
+## Stan for Hamiltonian Monte Carlo
+
+* In its simplest form, **Stan** implements an **HMC sampler**
+
+  * You specify the target distribution $\pi(\theta)$ **in a way Stan can understand**
+  
+  * Stan **generates and compiles C++ code** to evaluate $\pi(\theta)$ *and* $\nabla_\theta \log \pi(\theta)$
+  
+  * Stan **adapts the HMC step size** during a burn-in phase
+  
+* HMC samplers are (notoriously?) **difficult to tune**
+
+  * The the **total length of the path followed by the particle** (integration length) affects **sampling efficiency**
+  
+
+## An inefficient HMC sampler
+
+\vspace{12pt}badL.mp4
+
+## Stan's NUTS sampler
+
+* **Stan** also implements the **N**o **U**-**T**urn **S**ampler
+
+* Stops the particle when the sampler **detects** it has started making **a U-Turn**
+
+* Only tuning parameter needed is $\epsilon$ (the step size) which Stan **tunes during burn-in**
+
+
+## Stopping before a U-turn
+
+\centering
+
+\includegraphics[width=.7\columnwidth]{part_1_files/nuts.png}
+
+
+## Basics of a Stan model
+
+```
+parameters {
+  real theta;
+}
+model {
+  theta ~ normal(0, 1);
+}
+```
+
+```{r eval = FALSE}
+sm <- stan_model(model_code = ...)
+fit <- sampling(sm)
+```
+
+
+
+## Output from a basic Stan model
+
+```{r echo = FALSE, warning = FALSE, message = FALSE, include = FALSE}
+rstan_options(auto_write = TRUE)
+readr::write_file(path = here::here('vignettes/part_1_files/sm1.stan'), x = 'parameters {
+  real theta;
+}
+model {
+  theta ~ normal(0, 1);
+}\n\n')
+sm <- stan_model(file = here::here('vignettes/part_1_files/sm1.stan'))
+fit <- sampling(sm)
+```
+```{r fig.height = 4}
+stan_trace(fit)
+```
+
+
+## Bayesian linear regression example
+
+* Data $y$ and $X$
+
+  * $n$ observations in $y$ and $X$
+
+  * $p$ columns in $X$
+
+* Likelihood: $y|X \sim N(\alpha + X\beta, \sigma^2)$
+
+* Priors: 
+
+    * $\alpha, \beta \sim N(0, 1)$
+
+    * $\sigma \sim Expo(1)$
+
+
+## Stan model for linear regression
+
+```{r echo = FALSE, include = FALSE}
+sm2 <- '
+data {
+  int<lower = 0> n;
+  int<lower = 0> p;
+  vector[n] y;
+  matrix[n, p] X;
+}
+parameters {
+  real alpha;
+  vector[p] beta;
+  real<lower = 0> sigma;
+}
+model {
+  alpha ~ normal(0, 1);
+  beta ~ normal(0, 1);
+  sigma ~ exponential(1);
+
+  y ~ normal(alpha + X * beta, sigma);
+}
+'
+readr::write_file(x = paste0(sm2, '\n\n'), path = here::here('vignettes/part_1_files/sm2.stan'))
+```
+
+\vspace{-18pt}\smaller
+
+```{r echo = FALSE, output = 'asis', comment=''}
+cat(readr::read_file(here::here('vignettes/part_1_files/sm2.stan')))
+```
+
+## Compiling and sampling from R
+
+```{r echo = FALSE, warning = FALSE, message = FALSE, include = FALSE}
+sm2 <- stan_model(here::here('vignettes/part_1_files/sm2.stan'))
+set.seed(2)
+n <- 100
+p <- 4
+alpha <- 1
+beta <- rnorm(p, 0, 1)
+sigma <- rexp(1)
+X <- matrix(rnorm(n * p), ncol = p)
+y <- as.vector(alpha + X %*% beta + rnorm(n, 0, sigma))
+fit <- sampling(sm2, data = list(n = n, p = p, X = X, y = y))
+```
+
+```{r eval = FALSE}
+library(rstan)
+sm <- stan_model(file = 'my_model.stan')
+
+X <- ...
+y <- ...
+d <- list(n = nrow(X), p = ncol(X), 
+          X = X, y = y)
+
+fit <- sampling(sm, data = d)
+```
+
+## Trace plots
+
+```{r fig.height = 3, fig.width = 6}
+stan_trace(fit)
+```
+
+## Sample autocorrelation
+
+```{r fig.height = 3, fig.width = 6}
+stan_ac(fit)
+```
+
+## Posterior means and intervals
+
+```{r fig.height = 3, fig.width = 6, warning = FALSE, message = FALSE}
+stan_plot(fit)
+```
+
+## Parts of a Stan model
+
+```
+functions { ... }
+
+data { ... }
+
+transformed data { ... }
+
+parameters { ... }
+
+transformed parameters { ... }
+
+model { ... }
+
+generated quantities { ... }
+```
+
+```{r echo = FALSE, include = FALSE}
+d <- data_frame(y) %>%
+  bind_cols(as_data_frame(X)) %>%
+  rename_at(vars(starts_with('V')), funs(str_replace(., 'V', 'X')))
+```
+
+# Stan Inside™
+
+
+## What if I don't want to write my own Stan code?
+
+```{r eval = FALSE}
+library(rstanarm)
+fit <- stan_glm(y ~ 1 + X1 + X2 + X3 + X4, data = d,
+           prior = normal(0, 1),
+           prior_intercept = normal(0, 1),
+           prior_aux = exponential(1))
+```
+
+```{r echo = FALSE, include = FALSE}
+fit <- stan_glm(y ~ 1 + X1 + X2 + X3 + X4, data = d,
+           prior = normal(0, 1),
+           prior_intercept = normal(0, 1),
+           prior_aux = exponential(1))
+```
+
+
+* `rstanarm` uses Stan to estimate complex hierarchical and non-gaussian models
+
+* Created by Stan team, integrates nicely with `bayesplot`
+
+  * Another alternative is `brms`, but `rstanarm` seems better so far
+
+---
+
+\relsize{-2}
+
+```{r eval = FALSE}
+summary(fit)
+```
+
+```
+Model Info:
+
+ function:     stan_glm
+ family:       gaussian [identity]
+ formula:      y ~ 1 + X1 + X2 + X3 + X4
+ algorithm:    sampling
+ priors:       see help('prior_summary')
+ sample:       4000 (posterior sample size)
+ observations: 100
+ predictors:   5
+
+Estimates:
+                mean   sd     2.5%   25%    50%    75%    97.5%
+(Intercept)      1.0    0.1    0.8    0.9    1.0    1.1    1.2 
+X1              -0.7    0.1   -0.9   -0.8   -0.7   -0.6   -0.4 
+X2               0.2    0.1    0.0    0.2    0.2    0.3    0.4 
+X3               1.5    0.1    1.3    1.4    1.5    1.6    1.7 
+X4              -1.1    0.1   -1.3   -1.2   -1.1   -1.1   -0.9 
+sigma            1.1    0.1    1.0    1.1    1.1    1.2    1.3 
+mean_PPD         1.1    0.2    0.8    1.0    1.1    1.2    1.4 
+log-posterior -161.3    1.8 -165.8 -162.2 -161.0 -160.0 -158.9 
+```
+
+---
+
+\relsize{-2}
+
+```
+Diagnostics:
+              mcse Rhat n_eff
+(Intercept)   0.0  1.0  4000 
+X1            0.0  1.0  4000 
+X2            0.0  1.0  4000 
+X3            0.0  1.0  4000 
+X4            0.0  1.0  4000 
+sigma         0.0  1.0  4000 
+mean_PPD      0.0  1.0  4000 
+log-posterior 0.0  1.0  1724 
+
+For each parameter, mcse is Monte Carlo standard error, n_eff is a crude 
+measure of effective sample size, and Rhat is the potential scale reduction 
+factor on split chains (at convergence Rhat=1).
+```
+
+
+## Density overlays
+
+```{r fig.height = 3, fig.width = 6, warning = FALSE, message = FALSE}
+fit %>% as.array() %>% bayesplot::mcmc_dens_overlay()
+```
+
+## Posterior predictive checks
+
+```{r fig.height = 3, fig.width = 6, warning = FALSE, message = FALSE}
+pp_check(fit)
+```
+
+## Automatic integration with `loo`
+
+```{r eval = FALSE}
+loo(fit)
+```
+
+```
+Computed from 4000 by 100 log-likelihood matrix
+
+         Estimate   SE
+elpd_loo   -157.0  5.4
+p_loo         5.5  0.7
+looic       314.1 10.9
+------
+Monte Carlo SE of elpd_loo is 0.0.
+
+All Pareto k estimates are good (k < 0.5).
+See help('pareto-k-diagnostic') for details.
+```
+
+
+# Conclusion
+
+## Why Stan is so important
+
+* **Coding errors** confined to **model specification**
+
+* If Stan fails, more likely due to a **problem with your model** than Stan
+  * Numerically ill-conditioned
+  * Non-identified
+  * Improper posterior
+
+* Nothing privileged about conjugacy
+  * **Choose priors based on what makes sense** for the model
+
+* Stan best practices and defaults should be MCMC best practices and defaults
+  * **Sampling diagnostics** based on output from HMC
+  * $\hat{R}$ for assessing **convergence**
+  * **Model comparison** via the `loo` package
+
+
+## Roadmap
+
+Part 1: Introduction to Hamiltonian Monte Carlo and Stan
+
+* Sampling from complex Bayesian models using standard methods is inefficient and error-prone
+
+* Hamiltonian Monte Carlo offers huge improvements
+
+* Intuition for how HMC works
+
+* Implementing an HMC sampler in Stan
+
+\vfill
+\hrule
+\vfill
+
+**Part 2: Alina Ferecatu on hierarchical logit and models of bounded rationality**
+
+Part 3: Hernan Bruno on multivariate Tobit and two-stage "hurdle" models
+
+

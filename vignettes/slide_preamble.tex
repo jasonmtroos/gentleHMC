@@ -1,0 +1,199 @@
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Textclass specific LaTeX commands.
+ % this default might be overridden by plain title style
+% \newcommand\makebeamertitle{\frame{\maketitle}}%
+ % (ERT) argument for the TOC
+% \AtBeginDocument{%
+%   \let\origtableofcontents=\tableofcontents
+%   \def\tableofcontents{\@ifnextchar[{\origtableofcontents}{\gobbletableofcontents}}
+%   \def\gobbletableofcontents#1{\origtableofcontents}
+% }
+
+\usepackage{ragged2e}
+
+\usepackage{tikz}
+\usetikzlibrary{arrows}
+
+%\usepackage[T1]{fontenc}
+%\usepackage[]{fontspec}
+\usepackage{etoolbox}
+\usepackage{booktabs}
+
+\defaultfontfeatures{ Scale = MatchUppercase }
+
+
+%\newfontfamily\AvenirNextLight[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Regular},ItalicFont={Avenir Next Ultra Light Italic},BoldItalicFont={Avenir Next Italic},Numbers=Lining]{Avenir Next Ultra Light}
+%\newfontfamily\AvenirNextRegular[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Medium},ItalicFont={Avenir Next Italic},BoldItalicFont={Avenir Next Medium Italic},Numbers=Lining]{Avenir Next Regular}
+%\newfontfamily\AvenirNextMedium[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Demi Bold},ItalicFont={Avenir Next Medium Italic},BoldItalicFont={Avenir Next Demi Bold Italic},Numbers=Lining]{Avenir Next Medium}
+\newfontfamily\AvenirNextDemiBold[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Bold},ItalicFont={Avenir Next Demi Bold Italic},BoldItalicFont={Avenir Next Bold Italic},Numbers=Lining]{Avenir Next Demi Bold}
+%\newfontfamily\AvenirNextBold[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Heavy},ItalicFont={Avenir Next Bold Italic},BoldItalicFont={Avenir Next Heavy Italic},Numbers=Lining]{Avenir Next Bold}
+%\newfontfamily\AvenirNextCondensedLight[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Condensed Regular},ItalicFont={Avenir Next Condensed Ultra Light Italic},BoldItalicFont={Avenir Next Condensed Italic},Numbers=Lining]{Avenir Next Condensed Ultra Light}
+\newfontfamily\AvenirNextCondensedRegular[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Condensed Medium},ItalicFont={Avenir Next Condensed Italic},BoldItalicFont={Avenir Next Condensed Medium Italic},Numbers=Lining]{Avenir Next Condensed Regular}
+\newfontfamily\AvenirNextCondensedMedium[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Condensed Demi Bold},ItalicFont={Avenir Next Condensed Medium Italic},BoldItalicFont={Avenir Next Condensed Demi Bold Italic},Numbers=Lining]{Avenir Next Condensed Medium}
+%\newfontfamily\AvenirNextCondensedDemiBold[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Condensed Bold},ItalicFont={Avenir Next Condensed Demi Bold Italic},BoldItalicFont={Avenir Next Condensed Bold Italic},Numbers=Lining]{Avenir Next Condensed Demi Bold}
+%\newfontfamily\AvenirNextCondensedBold[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Condensed Heavy},ItalicFont={Avenir Next Condensed Bold Italic},BoldItalicFont={Avenir Next Condensed Heavy Italic},Numbers=Lining]{Avenir Next Condensed Bold}
+
+%\newfontfamily\Menlo[Ligatures=TeX,Mapping=tex-text,Numbers=Lining,Scale=1]{Menlo}
+
+
+\setmainfont[Ligatures=TeX,Mapping=tex-text,Numbers=Lining]{Palatino}
+%\setsansfont[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Condensed Regular},ItalicFont={Avenir Next Condensed Italic},BoldItalicFont={Avenir Next Condensed Medium Italic},Numbers=Lining]{Avenir Next Condensed Regular}
+%\setmonofont[Numbers=Lining,Scale=.92]{Menlo}
+\setmathfont[Ligatures=TeX,Scale=MatchLowercase]{Asana-Math.otf}
+
+%\usepackage[colon=literal]{unicode-math}
+%\providecommand\regularmath{\setmathfont[Ligatures=TeX,Scale=MatchLowercase]{Asana-Math.otf}}
+%\providecommand\condensedmath{\setmathfont[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Condensed Medium},ItalicFont={Avenir Next Condensed Italic},BoldItalicFont={Avenir Next Condensed Medium Italic},Numbers=Lining,range="0030-"0039]{Avenir Next Condensed Regular}}
+%\regularmath
+
+\usepackage{relsize}
+\usepackage[nodisplayskipstretch]{setspace}
+
+
+\ifdefined\DeclareMathOperator\AtBeginDocument{%
+\DeclareMathOperator{\logit}{logit}%
+\DeclareMathOperator{\transpose}{\mathsf{T}}%
+\DeclareMathOperator*{\argmax}{arg~max}%
+}\fi
+
+
+
+
+
+\usefonttheme{professionalfonts} % use own font handling
+
+\setsansfont[Ligatures=TeX,Mapping=tex-text,BoldFont={Avenir Next Medium},ItalicFont={Avenir Next Italic},BoldItalicFont={Avenir Next Medium Italic},Numbers=Lining]{Avenir Next Regular}
+\setmonofont[Ligatures=TeX,Mapping=tex-text,Numbers=Lining,Scale=.92]{Menlo}
+\newfontfamily\condensed[Mapping=tex-text,ItalicFont={Avenir Next Condensed Medium Italic}]{Avenir Next Condensed Medium}
+\newfontface\mathexplainedtitle[Mapping=tex-text]{Avenir Next Condensed Medium}
+
+%\usepackage{fancyvrb}
+\usepackage{xcolor}
+%\usepackage[normalem]{ulem}
+%\usepackage{setspace}
+%\usepackage{soul}
+
+
+\definecolor{ccred}{RGB}{255,50,60}
+\definecolor{ccgreen}{RGB}{110,200,26}
+\definecolor{ccblue}{RGB}{128,203,224}
+\definecolor{ccyellow}{RGB}{244,211,0}
+
+\newcommand\ccred{$\color{ccred}\blacksquare$ }
+\newcommand\ccblue{$\color{ccblue}\blacksquare$ }
+\newcommand\ccgreen{$\color{ccgreen}\blacksquare$ }
+\newcommand\ccyellow{$\color{ccyellow}\blacksquare$ }
+
+\setbeamertemplate{note page}[plain]
+\setbeamercovered{transparent}
+\beamertemplatenavigationsymbolsempty
+
+\useoutertheme[footline=authortitle,subsection=false]{miniframes}
+\setbeamerfont{block title}{size=\relsize{0}}
+\setbeamersize{text margin left=3mm,text margin right=3mm}
+
+
+\definecolor{brightpink}{RGB}{235,52,84}
+\definecolor{duskyblue}{RGB}{27,120,158}
+\definecolor{paleblue}{RGB}{194,234,251}
+\definecolor{grey}{RGB}{51,51,51}
+\definecolor{darkblue}{RGB}{16,72,94}
+\definecolor{yellow}{RGB}{207,200,66}
+\definecolor{darkgreen}{RGB}{133,127,3}
+
+\setbeamercolor{palette tertiary}{fg=paleblue,bg=duskyblue}
+\setbeamercolor{palette secondary}{fg=paleblue,bg=duskyblue}
+\setbeamerfont{subsection in head/foot}{family=\AvenirNextCondensedRegular}
+\setbeamerfont{section in head/foot}{family=\AvenirNextCondensedRegular}
+\setbeamerfont{author in head/foot}{family=\AvenirNextCondensedRegular}
+\setbeamerfont{title in head/foot}{family=\AvenirNextCondensedRegular}
+\setbeamercolor{upper separation line head}{fg=duskyblue,bg=darkblue!25!duskyblue}
+\setbeamercolor{lower separation line foot}{fg=duskyblue,bg=darkblue!25!duskyblue}
+
+
+\setbeamercolor{titlelike}{fg=brightpink,bg=white}
+\setbeamerfont{title}{size=\relsize{2.5}}
+\setbeamerfont{frametitle}{family=\AvenirNextDemiBold}
+\setbeamerfont{title page}{family=\AvenirNextCondensedMedium,size=\relsize{1}}
+\setbeamercolor{institute}{fg=grey!75!white}
+\setbeamercolor{date}{fg=grey!75!white}
+\setbeamercolor{author}{fg=grey}
+\setbeamercolor{structure}{fg=brightpink}
+\setbeamercolor{alerted text}{fg=brightpink}
+
+
+
+\setbeamercolor{normal text}{fg=grey}
+\setbeamercolor{math text}{fg=darkblue!75!duskyblue}
+
+\setbeamercolor{itemize item}{fg=brightpink}
+\setbeamercolor{itemize subitem}{fg=duskyblue}
+\setbeamercolor{itemize subsubitem}{fg=grey!50!white}
+\setbeamercolor{enumerate item}{fg=brightpink}
+\setbeamercolor{enumerate subitem}{fg=duskyblue}
+\setbeamercolor{enumerate subsubitem}{fg=grey!50!white}
+
+\setbeameroption{hide notes}
+
+
+%\renewcommand\makebeamertitle{\frame[plain]{\maketitle}}
+
+\providecommand{\source}[1]{\hfill\tiny\color{grey!50!white}#1}
+\providecommand{\ic}[1]{{\AvenirNextCondensedRegular\color{duskyblue!50!paleblue}#1}}
+\providecommand{\mc}[1]{{\AvenirNextCondensedRegular\color{duskyblue}#1}}
+
+\AtBeginDocument{%
+ \addtobeamertemplate{frame begin}{\setlength{\abovedisplayskip}{-18pt}}{}
+ \addtobeamertemplate{frame begin}{\setlength{\belowdisplayskip}{-18pt}}{}
+ \addtobeamertemplate{frame begin}{\setlength{\abovedisplayshortskip}{-18pt}}{}
+ \addtobeamertemplate{frame begin}{\setlength{\belowdisplayshortskip}{-18pt}}{}
+}
+
+
+%\usepackage{dcolumn}
+%\newcolumntype{d}[2]{D{.}{.}{#1.#2}}
+
+\usepackage{nameref}
+\makeatletter
+\newcommand*{\currentname}{\@currentlabelname}
+\makeatother
+
+\AtBeginSection[] % Do nothing for \section*
+{
+  \begin{frame}<beamer>[c]
+  \usebeamerfont{frametitle}\usebeamercolor[fg]{frametitle}\currentname
+  \end{frame}
+  \subsection*{Placeholder}
+}
+\AtBeginSubsection[]{
+}
+
+\AtBeginDocument{%
+    \setbeamersize{description width of=\ccred}
+}
+
+\providecommand{\footnotelike}[1]{%
+	\vfill
+	\parbox{\columnwidth}{%
+	\begin{spacing}{.8}
+	\rule[0.5ex]{2in}{0.3pt}\\
+	\relsize{-2}#1\par
+	\end{spacing}%
+	}%
+}
+
+
+\let\oldtextbf\textbf
+\renewcommand{\textbf}[1]{\alert{\oldtextbf{#1}}}
+
+
+%\usepackage{tcolorbox}
+
+%\includeonlyframes{this}
+
+\ifdefined\intitlepunct\renewcommand*{\intitlepunct}{}\fi
+\ifdefined\renewbibmacro\renewbibmacro{in:}{}\fi
+
+
+\usepackage{microtype}
