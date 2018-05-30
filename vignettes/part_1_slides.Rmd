@@ -269,7 +269,7 @@ $$\begin{array}{rcccccccc}
   
 * HMC samplers are (notoriously?) **difficult to tune**
 
-  * The the **total length of the path followed by the particle** (integration length) affects **sampling efficiency**
+  * The **total length of the path followed by the particle** (integration length) affects **sampling efficiency**
   
 
 ## An inefficient HMC sampler
