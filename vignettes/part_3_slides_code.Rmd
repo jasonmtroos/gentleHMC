@@ -1,0 +1,307 @@
+---
+title: "Models with Zeros: (Multivariate) Tobit and Hurdle Models Using Stan"
+author: "Hernan Bruno"
+date: "EMAC 2018"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+# Tobit 
+
+This script generates data and estimates a tobit model with 
+heterogeneiety. In this particular example, we assume that households
+may or may not purchase from a category
+
+```{r}
+library(dplyr)
+library(rstan)
+library(ggplot2)
+```
+
+
+Initialize
+
+```{r}
+set.seed(1408)
+N_hh    = 200             # number of households
+N_purch = 20              # number of purchases per household
+alpha_0 = 1               # intercept
+sigma_alpha = .5          # variability across households
+sigma_y = 1
+beta    = -1
+```
+
+Create the simulated dataset.
+```{r}
+alpha_i = rnorm(N_hh, 0, sigma_alpha)
+x       = runif(N_hh*N_purch)
+df_alpha = data.frame(hh_id = 1:N_hh,
+                      alpha_i = alpha_i)
+
+sym_data = data.frame(hh_id = rep(df_alpha$hh_id, each=N_purch))
+sym_data = left_join(sym_data, df_alpha)
+sym_data$x = x
+sym_data = mutate(sym_data,
+                  ystar = alpha_0 +
+                          beta*x +
+                          alpha_i +
+                          rnorm(n(), 0, sigma_y),
+                  y = pmax(0, ystar),
+                  y_cen = ifelse(y == 0, 1, 0))
+
+data_stan = list(N = nrow(sym_data),
+                 N_hh = N_hh,
+                 hh_id = sym_data$hh_id,
+                 y = sym_data$y,
+                 y_cen = sym_data$y_cen,
+                 n_cen = sum(sym_data$y_cen))
+```
+
+```{r}
+stan_code_tobit="data {
+  int<lower=1> N;
+  int<lower=1> N_hh;
+  int<lower=1> hh_id[N];           // id of individuals
+  real y[N];                       // Censored data (assumed at zero)
+  int<lower=0, upper=1> y_cen[N];  // is left-censored : +1, 0
+  real x[N]; // covariates
+  int<lower=1> n_cen; 
+}
+parameters{
+  real<upper=0> y_miss[n_cen];
+  real alpha_0;
+  real alpha_i[N_hh];
+  real beta;
+  real<lower = 0> sigma_y;
+  real<lower = 0> sigma_alpha;
+}
+
+model {
+  real y_c;
+  int pos = 1;
+
+  alpha_i  ~ normal(0 , sigma_alpha);
+
+  for (n in 1:N){
+    if (y_cen[n] == 0){
+      y_c = y[n];
+    } else {
+      y_c = y_miss[pos];
+      pos = pos + 1;
+    }
+    y_c ~ normal(alpha_0 + alpha_i[hh_id[n]] + beta*x[n], sigma_y);
+  }
+}"
+```
+
+```{r}
+fit_tobit = stan(model_code = stan_code_tobit,
+                  data = data_stan,
+                  chains = 4, iter = 2000, thin=2)
+
+print(fit_tobit, c("alpha_0", "sigma_alpha", "beta"))
+```
+
+```{r}
+ext_tobit = extract(fit_tobit)
+par(mfrow=c(3, 1), mar = c(3, 2, 3, 2))
+plot(density(ext_tobit$alpha_0),
+    main = "alpha", xlab = "")
+abline(v=1, col = "blue")
+abline(v=mean(ext_tobit$alpha_0), col="red", lty = 2)
+
+plot(density(ext_tobit$sigma_alpha),
+     main = "sigma_alpha", xlab = "")
+abline(v=.5, col="blue")
+abline(v=mean(ext_tobit$sigma_alpha), col="red", lty = 2)
+
+plot(density(ext_tobit$beta),
+    main = "beta", xlab = "")
+abline(v=-1, col="blue")
+abline(v=mean(ext_tobit$beta), col="red", lty=2)
+
+daplot_tobit = data.frame(df_alpha,
+                       q025 = apply(ext_tobit$alpha_i, 2, quantile, probs =.025),
+                       q975 = apply(ext_tobit$alpha_i, 2, quantile, probs =.975),
+                       m_alpha = apply(ext_tobit$alpha_i, 2, mean))
+
+plot1 = ggplot(data= daplot_tobit,
+               aes(x= alpha_i, ymin=q025, ymax=q975))+
+       geom_linerange(colour="grey43") +
+       geom_abline(intercept = 0, slope = 1, colour = "blue") +
+       geom_point(data = daplot_tobit,
+                  aes(x = alpha_i, y = m_alpha),
+                  colour = "red", size = .75) +
+       xlab("True individual alpha") +
+       ylab("Estimated indivdiual alpha")
+  
+plot1
+```
+
+# Hurdle
+
+    This script generates data and estimates a hurdle model. It is a
+simplified model of a two-stage price change, where as salesperson first
+decides whether to change the price and if yes, by how much.
+A more advanced model would have a multinomial first stage, with prices
+going up, down, or staying the same. Such a model would be a simple 
+extension of this one.
+
+    Particularly important is the ability of stan to introduced multivariate
+heterogeneity at the salesperson level. We assume that each salesperson 
+has her/his own tendency to change prices. They also might have their own
+tendency to lower or increase prices. In this particular example, we assume
+that these two salesperson characteristics are negatively correlated. 
+That is to say, those salespeople more likely to change prices, are also
+those more likely to lower prices. This need not be the case in real life.
+We also assume there are covariates that can influence these decisions.
+
+```{r}
+library(mvtnorm)
+library(dplyr)
+library(rstan)
+```
+
+```{r}
+# Initialize
+set.seed(1408)
+N_speople = 200  # How many individual decision makers
+N_trans = 50     # How many transactions
+Nobs = N_speople * N_trans
+```
+
+   Suggestion: explore situations with many salespeople and few transactions
+and compare it to a situation with few salespeople with lots of transactions.
+
+The model has a hurdle where 
+```
+prob_change  = logit^{-1}( alpha_i + alpha_1 x1 + alpha_2 x3)
+and a quantity equation 
+pricechange  =  beta_i + beta_1 x2 + beta_2 x3)
+```
+
+```{r}
+
+alpha_1 = .2
+alpha_2 = .3
+beta_1  = -.3
+beta_2  = .4
+```
+
+    The individual intercepts for each step have their own standard 
+deviation and are correlated by rho. Here we define the covaraiance 
+matrix to simulate the data.
+
+```{r}
+
+s_alpha  = 1
+s_beta   = .5
+rho       = -.7
+```
+
+create a covariance matrix
+
+```{r}
+Sigma = matrix(ncol=2, nrow=2)
+Sigma[1,1] = s_alpha^2
+Sigma[2,2] = s_beta^2
+Sigma[1,2] = s_alpha * s_beta * rho
+Sigma[2,1] = Sigma[1,2]
+```
+
+Draw a value of alpha and beta for each salesperson.
+The mean for alpha_i is set at -1 and the for beta_i at .5
+```{r}
+temp = rmvnorm(N_speople, c(-1, .5), Sigma)
+df_sp = data.frame(spid = 1:N_speople,
+                   alpha_s= temp[, 1],
+                   beta_s = temp[, 2])
+
+sym_data = data.frame(spid = rep(df_sp$spid, each = N_trans))
+
+sym_data = left_join(sym_data, df_sp) %>%
+           mutate(x_1 = runif(n()),
+                  x_2 = runif(n()),
+                  x_3 = runif(n()),
+                  lo_change  = alpha_s + alpha_1*x_1 + alpha_2*x_3,
+                  mean_change = beta_s + x_2*beta_1 + beta_2*x_3,
+                  prob_change = exp(lo_change) / 
+                                (1 + exp(lo_change)),
+                  price_change = rbinom(n(), 1, prob_change),
+                  new_price = rnorm(n(), mean_change, 1))
+```
+
+```{r}
+stan_code ="
+data {
+  int<lower=0> N;             // observations
+  int<lower=0> S;             // number of salespeople
+  int<lower=0> spid[N];       // identifier of salesperson      
+  real x1[N];                 //   Covariates, notice that
+  real x2[N];                 // that these could be introduced
+  real x3[N];                 // as a matrix.
+  int <lower=0, upper=1> Pchan[N];   // indicator
+  real pricechange[N];       // how much did the price change
+}
+
+parameters{
+  corr_matrix[2] Omega;
+  vector<lower=0>[2] tau;
+  vector[2] mu_ab;
+  vector[2] ab[S];
+  real alpha_1;             //   The alpha's could be defined as 
+  real alpha_2;             // vectors. And the beta also. 
+  real beta_1;
+  real beta_2;
+  real <lower=0> sigma_price;
+}
+
+model{
+  real lo_change;           // lo stands for log-odds
+  real mean_change; 
+  tau ~ cauchy(0,2.5);
+  Omega ~ lkj_corr(1);
+  for (s in 1:S){
+    ab[s] ~ multi_normal(mu_ab, quad_form_diag(Omega, tau));
+  }
+
+  for (n in 1:N){
+    mean_change = ab[spid[n], 2] + x2[n]*beta_1 +x3[n]*beta_2;
+    lo_change = ab[spid[n], 1] + x1[n]*alpha_1 + x3[n]*alpha_2;
+    if(Pchan[n] > 0){
+      pricechange[n] ~ normal(mean_change, sigma_price);
+    }
+    Pchan[n] ~ bernoulli_logit(lo_change);
+  }
+}
+"
+da_stan = list(N = Nobs,
+               S = N_speople,
+               spid = sym_data$spid,
+               x1 = sym_data$x_1,
+               x2 = sym_data$x_2,
+               x3 = sym_data$x_3,
+               Pchan = sym_data$price_change,
+               pricechange = sym_data$new_price)
+
+fit_2stage = stan(model_code = stan_code, data = da_stan, chains = 2, iter = 1000, thin=2)
+
+print(fit_2stage, c("tau", "Omega", "mu_ab", "alpha_1", "alpha_2", "beta_1", "beta_2",  "sigma_price"))
+```
+
+To print the table into LaTeX
+```{r}
+library(xtable)
+xtable(print(fit_2stage, c("tau", "Omega", "mu_ab", "alpha_1", "alpha_2", "beta_1", "beta_2",  "sigma_price")))
+```
+
