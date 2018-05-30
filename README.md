@@ -1,8 +1,10 @@
 # gentleHMC
 
 This repository contains materials that appeared in the EMAC 2018 Quantitative Marketing SIG: 
-A Gentle Introduction to Estimation Bayesian Models Using Stan. You can browse the repository
-or install it as an R package:
+A Gentle Introduction to Estimation Bayesian Models Using Stan. 
+
+The code is organized into an R package, but we haven't tested whether it works as such. 
+To install the code as an R package, do the following:
 
 ```{r}
 # install.packages('devtools')
